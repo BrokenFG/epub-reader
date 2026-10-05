@@ -164,17 +164,12 @@
 
   function renderMarkdownBook(files) {
     const ordered = orderChapterFiles(files);
-    const sections = ordered.map(f => ({ href: f.name, html: marked.parse(f.text) }));
+    const sections = ordered.map(f => ({ href: f.name, md: f.text }));  // parsed when shown
     chapters = ordered.map(f => {
       const h = f.text.match(/^#{1,3}\s+(.+)$/m);
       return { title: h ? h[1].trim() : f.name.replace(/\.md$/i, ''), href: f.name, level: 0 };
     });
     mountSections(sections, '');
-    // external links must not navigate the reader away
-    reader.querySelectorAll('a[href^="http"]').forEach(a => {
-      a.target = '_blank';
-      a.rel = 'noopener noreferrer';
-    });
   }
 
   /* ── Export a .md folder book as EPUB 3 (with an NCX for older readers) ── */
@@ -351,6 +346,7 @@ ${items.map((it, i) => `    <navPoint id="np${i + 1}" playOrder="${i + 1}"><navL
 
     let pending = false;
     window.addEventListener('scroll', () => {
+      if (!(anchor && reader.contains(anchor.el) && anchor.width !== reader.offsetWidth)) fillWindow();
       if (pending) return;
       pending = true;
       requestAnimationFrame(() => {
@@ -497,9 +493,8 @@ ${items.map((it, i) => `    <navPoint id="np${i + 1}" playOrder="${i + 1}"><navL
 
     renderToc(chapters);
 
-    // restore scroll position
-    const savedPos = localStorage.getItem(`epub-progress-${id}`);
-    requestAnimationFrame(() => { scroller.scrollTop = savedPos ? parseInt(savedPos, 10) : 0; });
+    // restore reading position
+    restorePosition(localStorage.getItem(`epub-progress-${id}`));
 
     // periodic save
     scrollSaveTimer = setInterval(() => saveScrollPosition(), 3000);
@@ -676,42 +671,148 @@ ${items.map((it, i) => `    <navPoint id="np${i + 1}" playOrder="${i + 1}"><navL
     mountSections(sectionContents, mergedCss);
   }
 
-  function mountSections(sectionContents, css) {
-    reader.innerHTML = '';
+  /* ── Windowed rendering ──
+     Only the chapters around the reading position are in the DOM; neighbours are
+     added/removed while scrolling. Phones stop painting very tall pages,
+     so the whole book can't be one long page. */
+  let bookSections = [];  // { href, html } or { href, md } (markdown parsed on demand)
+  let win = { start: 0, end: 0 };  // rendered range [start, end)
+  const EDGE = () => innerHeight * 2;  // keep this much text beyond the screen
 
-    for (let i = 0; i < sectionContents.length; i++) {
-      if (i > 0) {
-        const hr = document.createElement('hr');
-        hr.className = 'section-break';
-        reader.appendChild(hr);
-      }
-      const div = document.createElement('div');
-      div.className = 'section-content';
-      div.id = 'section-' + i;
-      div.dataset.href = sectionContents[i].href;
-      div.innerHTML = sectionContents[i].html;
-      reader.appendChild(div);
-    }
+  function mountSections(sectionContents, css) {
+    bookSections = sectionContents;
+    win = { start: 0, end: 0 };
+    reader.innerHTML = '';
 
     // apply merged CSS (scoped to #reader)
     if (css) {
       const style = document.createElement('style');
-      // scope all rules to #reader
       try {
         style.textContent = scopeCss(css, '#reader .section-content');
       } catch {
         style.textContent = css;
       }
-      reader.prepend(style);
+      reader.appendChild(style);
     }
 
+    setupChapterTracking();
+  }
+
+  function buildSection(i) {
+    const sec = bookSections[i];
+    if (sec.html == null) sec.html = marked.parse(sec.md);
+
+    const wrap = document.createElement('div');
+    wrap.className = 'section-wrap';
+    wrap.dataset.i = i;
+    if (i > 0) {
+      const hr = document.createElement('hr');
+      hr.className = 'section-break';
+      wrap.appendChild(hr);
+    }
+    const div = document.createElement('div');
+    div.className = 'section-content';
+    div.id = 'section-' + i;
+    div.dataset.href = sec.href;
+    div.innerHTML = sec.html;
+    wrap.appendChild(div);
+
     // clean up empty paragraphs
-    reader.querySelectorAll('.section-content p').forEach(p => {
+    div.querySelectorAll('p').forEach(p => {
       if (!p.textContent.trim() && !p.querySelector('img')) p.remove();
     });
+    // external links must not navigate the reader away
+    div.querySelectorAll('a[href^="http"]').forEach(a => {
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+    });
+    return wrap;
+  }
 
-    // set up active chapter tracking
-    setupChapterTracking();
+  const wraps = () => reader.querySelectorAll('.section-wrap');
+
+  // change the DOM above the screen without moving the text on screen
+  function keepingPosition(ref, mutate) {
+    const top = ref.getBoundingClientRect().top;
+    mutate();
+    scroller.scrollTop += ref.getBoundingClientRect().top - top;
+  }
+
+  function fillWindow() {
+    if (!bookSections.length || win.end === win.start) return;
+    const edge = EDGE();
+    let w = wraps();
+    if (!w.length) return;  // book closed
+    // below: add while the rendered text ends less than `edge` past the screen
+    while (win.end < bookSections.length && w[w.length - 1].getBoundingClientRect().bottom < innerHeight + edge) {
+      reader.appendChild(buildSection(win.end++));
+      w = wraps();
+    }
+    // above
+    while (win.start > 0 && w[0].getBoundingClientRect().top > -edge) {
+      const first = w[0];
+      keepingPosition(first, () => reader.insertBefore(buildSection(--win.start), first));
+      w = wraps();
+    }
+    // drop chapters that are far away (2x the margin, so they don't flip-flop)
+    while (w.length > 1 && w[w.length - 1].getBoundingClientRect().top > innerHeight + 2 * edge) {
+      w[w.length - 1].remove();
+      win.end--;
+      w = wraps();
+    }
+    while (w.length > 1 && w[0].getBoundingClientRect().bottom < -2 * edge) {
+      const first = w[0];
+      keepingPosition(w[1], () => first.remove());
+      win.start++;
+      w = wraps();
+    }
+  }
+
+  // render a fresh window at chapter i, `frac` of the way into it, `offset` px below the top edge
+  function goToSection(i, frac = 0, offset = 0) {
+    wraps().forEach(w => w.remove());
+    if (!bookSections.length) return;
+    i = Math.max(0, Math.min(i | 0, bookSections.length - 1));
+    win = { start: i, end: i + 1 };
+    const wrap = buildSection(i);
+    reader.appendChild(wrap);
+    // enough text below so the scroll position isn't clamped
+    const h = wrap.getBoundingClientRect().height;
+    while (win.end < bookSections.length &&
+           reader.getBoundingClientRect().bottom - wrap.getBoundingClientRect().top < frac * h + innerHeight + EDGE()) {
+      reader.appendChild(buildSection(win.end++));
+    }
+    const r = wrap.lastElementChild.getBoundingClientRect();  // the text, not the divider above it
+    scroller.scrollTop += r.top + frac * r.height - offset;
+    fillWindow();
+    updateActiveChapter();
+  }
+
+  // reading position: first chapter crossing the top edge + how far into it
+  function currentPosition() {
+    for (const w of wraps()) {
+      const r = w.lastElementChild.getBoundingClientRect();
+      if (r.bottom > 0) return { i: +w.dataset.i, f: r.height ? Math.max(0, -r.top) / r.height : 0 };
+    }
+    return null;
+  }
+
+  function restorePosition(saved) {
+    let pos = null;
+    try { pos = JSON.parse(saved); } catch {}
+    if (pos && typeof pos === 'object') { goToSection(pos.i, pos.f); return; }
+    if (typeof pos === 'number' && pos > 0) {
+      // old format: a pixel offset in the full book. Lay the whole book out once to convert it
+      wraps().forEach(w => w.remove());
+      bookSections.forEach((_, i) => reader.appendChild(buildSection(i)));
+      win = { start: 0, end: bookSections.length };
+      scroller.scrollTop = pos;
+      const p = currentPosition();
+      goToSection(p ? p.i : 0, p ? p.f : 0);
+      saveScrollPosition();
+      return;
+    }
+    goToSection(0);
   }
 
   /* ── TOC parsing ── */
@@ -840,10 +941,13 @@ ${items.map((it, i) => `    <navPoint id="np${i + 1}" playOrder="${i + 1}"><navL
 
   function jumpToChapter(href) {
     const cleanHref = href.split('#')[0];
-    const section = reader.querySelector(`.section-content[data-href="${cleanHref}"]`);
+    const section = reader.querySelector(`.section-content[data-href="${CSS.escape(cleanHref)}"]`);
     if (section) {
       const y = scroller.scrollTop + section.getBoundingClientRect().top - 20;
       window.scrollTo({ top: y, behavior: 'smooth' });
+    } else {
+      const i = bookSections.findIndex(s => s.href === cleanHref);
+      if (i >= 0) goToSection(i, 0, 20);
     }
     sidebar.classList.remove('open');
   }
@@ -918,7 +1022,8 @@ ${items.map((it, i) => `    <navPoint id="np${i + 1}" playOrder="${i + 1}"><navL
   /* ── Scroll position save/restore ── */
   function saveScrollPosition() {
     if (!currentId) return;
-    localStorage.setItem(`epub-progress-${currentId}`, String(scroller.scrollTop));
+    const pos = currentPosition();
+    if (pos) localStorage.setItem(`epub-progress-${currentId}`, JSON.stringify(pos));
   }
 
   /* ── IndexedDB ── */

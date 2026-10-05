@@ -353,6 +353,11 @@ html, body {
 }
 
 /* ── Book content (rendered HTML from EPUB) ── */
+/* one chapter (hr + content); flow-root keeps the hr margin inside it */
+#reader .section-wrap {
+  display: flow-root;
+}
+
 #reader .section-break {
   border: none;
   border-top: 1px solid var(--border);
