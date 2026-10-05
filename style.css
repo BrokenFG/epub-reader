@@ -161,7 +161,7 @@ html, body {
   transition: opacity 0.15s;
 }
 
-.book-export {
+.book-action {
   position: absolute;
   bottom: 8px;
   right: 8px;
@@ -175,12 +175,25 @@ html, body {
   transition: opacity 0.15s, color 0.15s;
 }
 
-.book-export:hover {
+.book-action:hover {
   color: var(--accent);
 }
 
+.book-refresh {
+  right: 30px;
+}
+
+.book-refresh.spinning svg {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 .book-item:hover .book-delete,
-.book-item:hover .book-export {
+.book-item:hover .book-action,
+.book-refresh.spinning {
   opacity: 1;
 }
 
@@ -537,9 +550,13 @@ html, body {
     padding: 6px 8px;
   }
 
-  .book-export {
+  .book-action {
     opacity: 0.8;
     padding: 6px 8px;
+  }
+
+  .book-refresh {
+    right: 38px;
   }
 }
 

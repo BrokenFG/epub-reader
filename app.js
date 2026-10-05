@@ -68,6 +68,7 @@
      With a directory handle (Chrome/Edge) chapters are re-read from disk on open;
      `files` is the last snapshot, used when access to the folder isn't granted. */
   async function pickFolder() {
+    refreshTargetId = null;
     if (!window.showDirectoryPicker) {
       // phones can't pick folders reliably: select the chapter files instead
       (matchMedia('(pointer: coarse)').matches ? mdInput : folderInput).click();
@@ -95,7 +96,16 @@
   async function handleMdInput() {
     const picked = [...mdInput.files].filter(f => /\.(md|markdown|txt)$/i.test(f.name));
     mdInput.value = '';
+    const targetId = refreshTargetId;
+    refreshTargetId = null;
     if (!picked.length) return;
+    if (targetId) {  // "refresh" on a book without folder access: replace its chapters
+      const files = await Promise.all(picked.map(async f => ({ name: f.name, text: await f.text() })));
+      const data = await idbLoad(targetId);
+      await idbSave(targetId, { ...data, kind: 'folder', files });
+      if (currentId === targetId) rerenderFolderBook(files);
+      return;
+    }
     const folderBooks = getLibrary().filter(b => b.kind === 'folder');
     const hint = folderBooks.length ? '\n(то же название — главы обновятся в существующей книге)' : '';
     const name = prompt('Название книги' + hint, folderBooks.at(-1)?.name || 'Новая книга');
@@ -149,6 +159,41 @@
     } catch {
       return data;  // e.g. no user gesture when restoring on page load
     }
+  }
+
+  /* ── Refresh a folder book (pick up edited / added chapters) ── */
+  let refreshTargetId = null;  // md-file picker was opened to update this book
+
+  async function refreshFolderBook(id, btn) {
+    const data = await idbLoad(id);
+    if (!data) return;
+    if (!data.handle) {  // phone / one-time snapshot: no folder access, pick the files again
+      refreshTargetId = id;
+      mdInput.click();
+      return;
+    }
+    btn.classList.add('spinning');
+    try {
+      let perm = await data.handle.queryPermission({ mode: 'read' });
+      if (perm === 'prompt') perm = await data.handle.requestPermission({ mode: 'read' });
+      if (perm !== 'granted') throw new Error('нет доступа к папке');
+      const files = await readFolderHandle(data.handle);
+      if (!files.length) throw new Error('в папке не найдено .md глав');
+      await idbSave(id, { ...data, files });
+      if (currentId === id) rerenderFolderBook(files);
+    } catch (err) {
+      alert('Не удалось обновить: ' + err.message);
+    } finally {
+      btn.classList.remove('spinning');
+    }
+  }
+
+  // re-render the open book in place, keeping the reading position
+  function rerenderFolderBook(files) {
+    saveScrollPosition();
+    renderMarkdownBook(files);
+    renderToc(chapters);
+    restorePosition(localStorage.getItem(`epub-progress-${currentId}`));
   }
 
   // natural order; drop variants like "chapter-483-gpt54.md" when "chapter-483.md" exists
@@ -417,7 +462,10 @@ ${items.map((it, i) => `    <navPoint id="np${i + 1}" playOrder="${i + 1}"><navL
           ${b.creator ? `<div class="book-author">${esc(b.creator)}</div>` : ''}
         </div>
         <button class="book-delete" data-id="${b.id}" title="Удалить">&times;</button>
-        ${b.kind === 'folder' ? `<button class="book-export" data-id="${b.id}" title="Скачать как EPUB">
+        ${b.kind === 'folder' ? `<button class="book-action book-refresh" data-id="${b.id}" title="Обновить главы из папки">
+          <svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M16 10a6 6 0 1 1-1.8-4.3M16 3v3.5h-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button class="book-action book-export" data-id="${b.id}" title="Скачать как EPUB">
           <svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M10 3v10m0 0l-4-4m4 4l4-4M4 16h12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>` : ''}
       </div>
@@ -425,8 +473,14 @@ ${items.map((it, i) => `    <navPoint id="np${i + 1}" playOrder="${i + 1}"><navL
 
     bookList.querySelectorAll('.book-item').forEach(el => {
       el.addEventListener('click', e => {
-        if (e.target.closest('.book-delete, .book-export')) return;
+        if (e.target.closest('.book-delete, .book-action')) return;
         openBook(el.dataset.id);
+      });
+    });
+    bookList.querySelectorAll('.book-refresh').forEach(el => {
+      el.addEventListener('click', e => {
+        e.stopPropagation();
+        refreshFolderBook(el.dataset.id, el);
       });
     });
     bookList.querySelectorAll('.book-export').forEach(el => {
@@ -792,7 +846,10 @@ ${items.map((it, i) => `    <navPoint id="np${i + 1}" playOrder="${i + 1}"><navL
   function currentPosition() {
     for (const w of wraps()) {
       const r = w.lastElementChild.getBoundingClientRect();
-      if (r.bottom > 0) return { i: +w.dataset.i, f: r.height ? Math.max(0, -r.top) / r.height : 0 };
+      if (r.bottom > 0) {
+        const i = +w.dataset.i;
+        return { i, href: bookSections[i].href, f: r.height ? Math.max(0, -r.top) / r.height : 0 };
+      }
     }
     return null;
   }
@@ -800,7 +857,12 @@ ${items.map((it, i) => `    <navPoint id="np${i + 1}" playOrder="${i + 1}"><navL
   function restorePosition(saved) {
     let pos = null;
     try { pos = JSON.parse(saved); } catch {}
-    if (pos && typeof pos === 'object') { goToSection(pos.i, pos.f); return; }
+    if (pos && typeof pos === 'object') {
+      // prefer the chapter file name: chapters may have been added/removed since
+      const byHref = pos.href ? bookSections.findIndex(s => s.href === pos.href) : -1;
+      goToSection(byHref >= 0 ? byHref : pos.i, pos.f);
+      return;
+    }
     if (typeof pos === 'number' && pos > 0) {
       // old format: a pixel offset in the full book. Lay the whole book out once to convert it
       wraps().forEach(w => w.remove());
