@@ -24,6 +24,7 @@
   const fontRange     = $('fontRange');
   const fontValue     = $('fontValue');
   const backdrop      = $('backdrop');
+  const fullscreenBtn = $('fullscreenBtn');
   const isMobile      = () => matchMedia('(max-width: 600px)').matches;
 
   /* ── Init ── */
@@ -36,6 +37,7 @@
     mdInput.addEventListener('change', handleMdInput);
     backdrop.addEventListener('click', () => sidebar.classList.remove('open'));
     initToggleAutoHide();
+    initFullscreen();
     sidebarToggle.addEventListener('click', toggleSidebar);
 
     // restore last open book
@@ -372,6 +374,24 @@ ${items.map((it, i) => `    <navPoint id="np${i + 1}" playOrder="${i + 1}"><navL
       sidebarToggle.classList.toggle('tucked', isMobile() && top > lastTop && top > 60);
       lastTop = top;
     }, { passive: true });
+  }
+
+  // hides the browser's address bar and system bars (not supported on iPhone Safari)
+  function initFullscreen() {
+    if (!document.fullscreenEnabled) return;
+    // the installed app already starts fullscreen (manifest display_override)
+    if (matchMedia('(display-mode: fullscreen)').matches) return;
+    fullscreenBtn.hidden = false;
+    const update = () => {
+      fullscreenBtn.textContent = document.fullscreenElement ? 'Выйти из полноэкранного режима' : 'На весь экран';
+    };
+    fullscreenBtn.addEventListener('click', () => {
+      if (document.fullscreenElement) document.exitFullscreen();
+      else document.documentElement.requestFullscreen({ navigationUI: 'hide' }).catch(() => {});
+      sidebar.classList.remove('open');
+    });
+    document.addEventListener('fullscreenchange', update);
+    update();
   }
 
   function applyWidth(pct) {

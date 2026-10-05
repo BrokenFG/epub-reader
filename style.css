@@ -286,6 +286,22 @@ html, body {
   margin-top: 12px;
 }
 
+.setting-btn {
+  width: 100%;
+  margin-top: 14px;
+  padding: 8px;
+  background: var(--sidebar-hover);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.setting-btn:hover {
+  background: var(--sidebar-active);
+}
+
 .settings-section input[type="range"] {
   width: 100%;
   accent-color: var(--accent);
