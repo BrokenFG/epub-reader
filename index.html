@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#111111">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="Reader">
+  <title>EPUB Reader</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="sidebar">
+    <div class="sidebar-header">
+      <h2>Библиотека</h2>
+      <div class="header-actions">
+        <button id="addFolderBtn" class="add-btn" title="Добавить папку с главами .md">
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+            <path d="M3 6a1 1 0 0 1 1-1h4l2 2h6a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <input type="file" id="folderInput" webkitdirectory hidden>
+        <input type="file" id="mdInput" accept=".md,text/markdown,text/plain" multiple hidden>
+        <label class="add-btn" title="Добавить книгу">
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+            <path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <input type="file" id="fileInput" accept=".epub" multiple hidden>
+        </label>
+      </div>
+    </div>
+    <div id="bookList" class="book-list"></div>
+    <div id="emptyLibrary" class="empty-library">
+      <p>Нет книг</p>
+      <p>Нажмите + чтобы добавить</p>
+    </div>
+    <div id="tocSection" class="toc-section" style="display:none">
+      <div class="toc-header">
+        <h3>Содержание</h3>
+      </div>
+      <div id="tocList" class="toc-list"></div>
+    </div>
+    <div class="settings-section">
+      <h3>Настройки</h3>
+      <div class="setting setting-width">
+        <label class="setting-row" for="widthRange">
+          <span>Ширина текста</span>
+          <span id="widthValue" class="setting-value"></span>
+        </label>
+        <input type="range" id="widthRange" min="20" max="100" step="1">
+      </div>
+      <div class="setting">
+        <label class="setting-row" for="fontRange">
+          <span>Размер шрифта</span>
+          <span id="fontValue" class="setting-value"></span>
+        </label>
+        <input type="range" id="fontRange" min="12" max="28" step="1">
+      </div>
+    </div>
+  </div>
+
+  <div id="backdrop" class="backdrop"></div>
+
+  <div id="readingArea">
+    <div id="emptyState" class="empty-state">
+      <div>
+        <svg width="64" height="64" viewBox="0 0 64 64" fill="none" style="margin-bottom:16px">
+          <rect x="8" y="12" width="48" height="40" rx="4" stroke="#555" stroke-width="2"/>
+          <path d="M8 12 L32 24 L56 12" stroke="#555" stroke-width="2" fill="none"/>
+          <path d="M32 24 L32 52" stroke="#555" stroke-width="2"/>
+        </svg>
+        <p>Выберите книгу из библиотеки</p>
+        <p style="font-size:12px;color:#555;margin-top:8px">или загрузите новую, нажав +</p>
+      </div>
+    </div>
+    <div id="bookContainer" class="book-container">
+      <div class="empty-panel"></div>
+      <div id="reader"></div>
+      <div class="empty-panel"></div>
+    </div>
+  </div>
+
+  <button id="sidebarToggle" class="sidebar-toggle" title="Меню (B)">
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+      <path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+    </svg>
+  </button>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
