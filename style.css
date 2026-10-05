@@ -17,11 +17,9 @@
 }
 
 html, body {
-  height: 100%;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background: var(--bg);
   color: var(--text);
-  overflow: hidden;
 }
 
 /* ── Sidebar ── */
@@ -89,6 +87,7 @@ html, body {
   max-height: 35%;
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;  /* don't scroll the page behind the sidebar */
   padding: 8px;
 }
 
@@ -222,6 +221,7 @@ html, body {
 .toc-list {
   flex: 1;
   overflow-y: auto;
+  overscroll-behavior: contain;  /* don't scroll the page behind the sidebar */
   padding: 0 8px 8px;
 }
 
@@ -310,7 +310,8 @@ html, body {
 
 /* ── Reading Area ── */
 #readingArea {
-  height: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   align-items: stretch;
 }
@@ -327,10 +328,10 @@ html, body {
 
 .book-container {
   display: none;
-  height: 100%;
   width: 100%;
-  overflow-y: auto;
+  /* the page scrolls, not this box; just cut off anything too wide */
   overflow-x: hidden;
+  overflow-x: clip;
 }
 
 .book-container.visible {
@@ -550,6 +551,7 @@ html, body {
     inset: 0;
     z-index: 99;
     background: rgba(0, 0, 0, 0.55);
+    touch-action: none;  /* swipes on the dimmed text shouldn't scroll it */
   }
 
   /* reader is always full width on a phone */

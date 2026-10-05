@@ -11,6 +11,8 @@
   const emptyLib      = $('emptyLibrary');
   const emptyState    = $('emptyState');
   const bookContainer = $('bookContainer');
+  // the page itself scrolls (not an inner box): nested scrollers misbehave on phones
+  const scroller      = document.scrollingElement || document.documentElement;
   const reader        = $('reader');
   const sidebar       = $('sidebar');
   const sidebarToggle = $('sidebarToggle');
@@ -297,13 +299,16 @@ ${items.map((it, i) => `    <navPoint id="np${i + 1}" playOrder="${i + 1}"><navL
     const saved = parseInt(localStorage.getItem('epub-reader-width'), 10);
     applyWidth(saved >= 20 && saved <= 100 ? saved : 36);
     widthRange.addEventListener('input', () => {
+      captureAnchor();  // anchor the exact current spot, then restore it right away
       applyWidth(+widthRange.value);
+      restoreAnchor();  // (the resize observer only needs to cover window resizes)
       localStorage.setItem('epub-reader-width', widthRange.value);
     });
 
     const savedFont = parseInt(localStorage.getItem('epub-reader-font'), 10);
     applyFont(savedFont >= 12 && savedFont <= 28 ? savedFont : 16);
     fontRange.addEventListener('input', () => {
+      captureAnchor();
       applyFont(+fontRange.value);
       restoreAnchor();  // width didn't change, so the observer won't do it
       localStorage.setItem('epub-reader-font', fontRange.value);
@@ -317,33 +322,35 @@ ${items.map((it, i) => `    <navPoint id="np${i + 1}" playOrder="${i + 1}"><navL
   let anchor = null;
 
   function captureAnchor() {
-    const box = bookContainer.getBoundingClientRect();
     const r = reader.getBoundingClientRect();
-    let el = document.elementFromPoint(r.left + r.width / 2, box.top + 4);
+    // prefer a paragraph over the gap between paragraphs (that hits the whole section)
+    let el = null;
+    for (let y = 4; y < 80 && !(el && el !== reader && reader.contains(el) && !el.classList.contains('section-content')); y += 8) {
+      el = document.elementFromPoint(r.left + r.width / 2, y);
+    }
     if (!el || el === reader || !reader.contains(el)) { anchor = null; return; }
     const rect = el.getBoundingClientRect();
     anchor = {
       el,
       width: reader.offsetWidth,
-      frac: rect.height ? (box.top - rect.top) / rect.height : 0,
+      frac: rect.height ? -rect.top / rect.height : 0,
     };
   }
 
   function restoreAnchor() {
     if (!anchor) return;
     if (!reader.contains(anchor.el)) { anchor = null; return; }  // book was switched
-    const box = bookContainer.getBoundingClientRect();
     const rect = anchor.el.getBoundingClientRect();
-    bookContainer.scrollTop += rect.top + anchor.frac * rect.height - box.top;
+    scroller.scrollTop += rect.top + anchor.frac * rect.height;
     anchor.width = reader.offsetWidth;
   }
 
   function initReadingAnchor() {
     // browser's own scroll anchoring fights with ours
-    bookContainer.style.overflowAnchor = 'none';
+    document.documentElement.style.overflowAnchor = 'none';
 
     let pending = false;
-    bookContainer.addEventListener('scroll', () => {
+    window.addEventListener('scroll', () => {
       if (pending) return;
       pending = true;
       requestAnimationFrame(() => {
@@ -368,8 +375,8 @@ ${items.map((it, i) => `    <navPoint id="np${i + 1}" playOrder="${i + 1}"><navL
   // on a phone the menu button covers the first lines: hide it while scrolling down
   function initToggleAutoHide() {
     let lastTop = 0;
-    bookContainer.addEventListener('scroll', () => {
-      const top = bookContainer.scrollTop;
+    window.addEventListener('scroll', () => {
+      const top = scroller.scrollTop;
       if (Math.abs(top - lastTop) < 8) return;
       sidebarToggle.classList.toggle('tucked', isMobile() && top > lastTop && top > 60);
       lastTop = top;
@@ -492,9 +499,7 @@ ${items.map((it, i) => `    <navPoint id="np${i + 1}" playOrder="${i + 1}"><navL
 
     // restore scroll position
     const savedPos = localStorage.getItem(`epub-progress-${id}`);
-    if (savedPos) {
-      requestAnimationFrame(() => { bookContainer.scrollTop = parseInt(savedPos, 10); });
-    }
+    requestAnimationFrame(() => { scroller.scrollTop = savedPos ? parseInt(savedPos, 10) : 0; });
 
     // periodic save
     scrollSaveTimer = setInterval(() => saveScrollPosition(), 3000);
@@ -837,9 +842,8 @@ ${items.map((it, i) => `    <navPoint id="np${i + 1}" playOrder="${i + 1}"><navL
     const cleanHref = href.split('#')[0];
     const section = reader.querySelector(`.section-content[data-href="${cleanHref}"]`);
     if (section) {
-      const y = bookContainer.scrollTop + section.getBoundingClientRect().top
-                - bookContainer.getBoundingClientRect().top - 20;
-      bookContainer.scrollTo({ top: y, behavior: 'smooth' });
+      const y = scroller.scrollTop + section.getBoundingClientRect().top - 20;
+      window.scrollTo({ top: y, behavior: 'smooth' });
     }
     sidebar.classList.remove('open');
   }
@@ -847,19 +851,18 @@ ${items.map((it, i) => `    <navPoint id="np${i + 1}" playOrder="${i + 1}"><navL
   /* ── Active chapter tracking ── */
   function setupChapterTracking() {
     if (!chapters.length) return;
-    bookContainer.addEventListener('scroll', updateActiveChapter, { passive: true });
+    window.addEventListener('scroll', updateActiveChapter, { passive: true });
     updateActiveChapter();
   }
 
   function updateActiveChapter() {
     if (!chapters.length) return;
     const sections = reader.querySelectorAll('.section-content');
-    const scrollTop = bookContainer.scrollTop;
-    const containerTop = bookContainer.getBoundingClientRect().top;
+    const scrollTop = scroller.scrollTop;
     let activeIdx = 0;
 
     for (let i = sections.length - 1; i >= 0; i--) {
-      const sectionTop = sections[i].getBoundingClientRect().top - containerTop + scrollTop;
+      const sectionTop = sections[i].getBoundingClientRect().top + scrollTop;
       if (sectionTop - 60 <= scrollTop) {
         activeIdx = i;
         break;
@@ -915,7 +918,7 @@ ${items.map((it, i) => `    <navPoint id="np${i + 1}" playOrder="${i + 1}"><navL
   /* ── Scroll position save/restore ── */
   function saveScrollPosition() {
     if (!currentId) return;
-    localStorage.setItem(`epub-progress-${currentId}`, String(bookContainer.scrollTop));
+    localStorage.setItem(`epub-progress-${currentId}`, String(scroller.scrollTop));
   }
 
   /* ── IndexedDB ── */
